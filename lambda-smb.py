@@ -1,3 +1,11 @@
+"""
+Purpose:
+
+Connects AWS Lambda to a SMB share running on Windows Server or AWS FSX for Windows. 
+Once connected, it will attempt to download a file from a s3 bucket and write it to 
+the SMB share specified in SeceretsManager.
+"""
+
 import json
 import boto3
 import base64
@@ -5,43 +13,49 @@ import os
 from botocore.exceptions import ClientError
 from smb.SMBConnection import SMBConnection
 def lambda_handler(event, context):
-    #Call function to get file share secret from AWS Secrets Manager
+    #Call function to get file share secrets from AWS Secrets Manager
     secret = get_secret(event)
     json_string = json.loads(secret['SecretString'])
+    #Remember: dict.get's are from secrets manager and events are from lambda input
     dict = json.loads(secret['SecretString'])
     domain = dict.get("domain")
-    # domain = "fbaseball.com"
-    username = dict.get("user")
+    username = dict.get("username")
     password = dict.get("password")
     client = ""
     server_name = dict.get("hostname")
     server_ip = dict.get("ip")
-    # serverName = "amznfsxunka4az9.corp.fbaseball.com"
     port = int(dict.get("port"))
-    s3_bucket = "aws-athena-query-results-245373689766-us-east-1"
-    filename = event['file']
+    ### Source file
+    s3_bucket = "cigna-smb-test"
+    filename = event['sourceFile']
     tmp_dir = "/tmp"
     tmp_file = tmp_dir + "/" + filename
+    ### FSX Share
     dest_share = dict.get("destShare")
     dest_dir = dict.get("destFolder")
     dest_file = dest_dir + "/" + filename
+    ### SMB Connection
     conn = None
     print('Attempting to establish SMB connection to destination file share.')
+    print("Troubleshoot:" ,username,password,client,server_name,domain,server_ip,port)
     #Attempt to establish SMB connection to destination file share
     try:
         if domain is not None:
             conn = SMBConnection(username, password, client, server_name, domain=domain, use_ntlm_v2=True, is_direct_tcp=True)
         else:
             conn = SMBConnection(username, password, client, server_name, use_ntlm_v2=True, is_direct_tcp=True)
+            print("The password is" ,password)
         if server_ip is not None:
             connected = conn.connect(server_ip, port)
+            print("Using IP to connect")
         else:
             connected = conn.connect(server_name, port)
+            print("Using Hostname to connect")
         if connected:
             print('Successfully connected to destination share.')
     except Exception as e:
         print('Error connecting to destination file share.')
-        print(e)
+        raise e
     print('Attempting to download source file from Amazon S3.')
     #Copy source file from s3
     try:
@@ -52,6 +66,7 @@ def lambda_handler(event, context):
         file_obj = open(tmp_file, 'rb')
     except:
         print('Error downloading file from S3. Check S3 permissions.')
+        raise e
     print('Checking to see if destination directory already exists.')
     #Check to see if the destination directory exists. Create it if it does not
     try:
@@ -77,17 +92,12 @@ def lambda_handler(event, context):
         print('Error deleting source file from local temp directory.')
 #Get the file share credentials from AWS Secrets Manager
 def get_secret(event):
-    print('Attempting to get credentials from AWS Secrets Manager.')
-    secret_name = event['share']
-    region_name = "us-east-1"
+    print('Attempting to get credentials and parameters from AWS Secrets Manager.')
+    secret_name = event['smName']
+    region_name = event['smRegion']
+    print(secret_name)
     # Create a Secrets Manager client
     session = boto3.session.Session()
-    # client = session.client(
-    #     service_name='secretsmanager',
-    #     region_name=region_name,
-    #     aws_access_key_id='keyid',
-    #     aws_secret_access_key='access'
-    # )
     client = session.client(
         service_name='secretsmanager',
         region_name=region_name
