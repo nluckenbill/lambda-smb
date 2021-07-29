@@ -64,7 +64,7 @@ def lambda_handler(event, context):
         print('Successfully downloaded file to local temp directory ' + tmp_dir + '.')
         #open rb (read binary)
         file_obj = open(tmp_file, 'rb')
-    except:
+    except Exception as e:
         print('Error downloading file from S3. Check S3 permissions.')
         raise e
     print('Checking to see if destination directory already exists.')
